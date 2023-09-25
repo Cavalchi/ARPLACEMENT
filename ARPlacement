@@ -1,0 +1,158 @@
+// código usado na unity para fazer que ele reconhece a API AR PLANE MANAGER SCRIPT no AR SESSIONS ORIGIN
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.XR.ARFoundation;
+using UnityEngine.XR.ARSubsystems;
+public class ARPlacement : MonoBehaviour
+{
+    public GameObject arObjectToSpawn;// Indicador de posição
+    public GameObject placementIndicator;// Objeto colocado em AR
+    public GameObject spawnedObject;// Posição em que o objeto será colocado
+    private Pose PlacementPose;// Gerenciador de raycasting
+    private ARRaycastManager aRRaycastManager;// Variável para verificar se a posição de colocação é válida
+    private bool placementPoseIsValid = false;// Distância inicial entre os dedos no pinch to zoom
+    private float initialDistance;// Escala inicial do objeto antes do pinch to zoom
+    private Vector3 initialScale;// Habilita ou desabilita rotação e escala do objeto
+    public bool allowRotationAndScaling = true;// Touch fixado na tela para rotação
+    private Touch _fixedTouch;// Indica se o botão de direção está pressionado
+    public bool isDriveButtonPressed;// Indica se há um touch fixado na tela para rotação
+    private bool isFixedTouch;// Rotação atual do objeto
+    public float currentRotation = 0f;
+    public CarInside carInside; // Referência para o script CarInside
+    public bool isPinchToZoomActive = false;
+    public float currentZPosition { get; set; }
+    private Vector3 initialObjectPosition;
+    void Start()
+    {
+        // Obtém o componente ARRaycastManager
+        aRRaycastManager = FindObjectOfType<ARRaycastManager>();
+    }
+    void Update()
+    {
+        Touch firstTouch = new Touch();
+        Touch secondTouch = new Touch();
+        // Verifica se o objeto já foi colocado em AR e se a posição é válida
+        if (spawnedObject == null && placementPoseIsValid && Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began)
+        {
+            // Coloca o objeto em AR
+            ARPlaceObject();
+            spawnedObject.transform.Rotate(0f, 100f, 0f);
+        }
+        // Verifica se o objeto foi colocado em AR e se permite rotação e escala
+        if (spawnedObject != null && allowRotationAndScaling)
+        {
+            // Verifica se há dois toques na tela
+            if (Input.touchCount == 2)
+            {
+                firstTouch = Input.GetTouch(0);
+                secondTouch = Input.GetTouch(1);
+                isPinchToZoomActive = true;
+                // Verifica se um dos toques acabou de ser iniciado
+                if (firstTouch.phase == TouchPhase.Began || secondTouch.phase == TouchPhase.Began)
+                {
+                    // Define a distância inicial entre os dedos
+                    initialDistance = Vector2.Distance(firstTouch.position, secondTouch.position);
+                    // Define a escala inicial do objeto
+                    initialScale = spawnedObject.transform.localScale;
+                }
+                // Verifica se um dos toques está se movendo
+                else if (firstTouch.phase == TouchPhase.Moved || secondTouch.phase == TouchPhase.Moved)
+                {
+                    float currentDistance = Vector2.Distance(firstTouch.position, secondTouch.position);// Calcula a distância atual entre os dedos
+                    float deltaDistance = currentDistance - initialDistance; // Calcula a diferença de distância desde o início do pinch to zoom
+                    float scaleFactor = 0.0009f; // Reduz o fator de escala para diminuir a velocidade do aumento e redução de escala
+                    Vector3 newScale = initialScale + Vector3.one * deltaDistance * scaleFactor; // Calcula a nova escala do objeto
+                    float minScale = 0.1f; // Define a escala mínima permitida para o objeto
+                    float maxScale = 30f; // Define a escala máxima permitida para o objeto
+                    newScale.x = Mathf.Clamp(newScale.x, minScale, maxScale); // Garante que a nova escala esteja dentro do intervalo aceitável
+                    newScale.y = Mathf.Clamp(newScale.y, minScale, maxScale);
+                    newScale.z = Mathf.Clamp(newScale.z, minScale, maxScale);
+                    spawnedObject.transform.localScale = newScale;
+                }
+            }
+            else if (Input.touchCount == 1)
+            {
+                firstTouch = Input.GetTouch(0);
+                if (firstTouch.position.y < Screen.height / 2) // Verifica se o toque está na parte inferior da tela
+                {
+                    if (firstTouch.phase == TouchPhase.Began)
+                    {
+                        _fixedTouch = firstTouch;
+                    }
+                    else if (firstTouch.phase == TouchPhase.Moved)
+                    {
+                        float deltaRotation = firstTouch.deltaPosition.x * 0.05f; // Caalcula a quantidade de rotação apenas no eixo X
+                        spawnedObject.transform.Rotate(Vector3.up, -deltaRotation, Space.World); // Aplica a rotação apenas no eixo X
+                    }
+                }
+            }
+           
+            isPinchToZoomActive = false;
+        }
+        UpdatePlacementPose();
+        UpdatePlacementIndicator();
+    }
+    void UpdatePlacementIndicator()
+    {
+        if (spawnedObject == null && placementPoseIsValid)
+        {
+            placementIndicator.SetActive(true);
+            placementIndicator.transform.SetPositionAndRotation(PlacementPose.position, PlacementPose.rotation);
+        }
+        else
+        {
+            placementIndicator.SetActive(false);
+        }
+    }
+    void UpdatePlacementPose()
+    {
+        var screenCenter = Camera.current.ViewportToScreenPoint(new Vector3(0.5f, 0.5f));
+        var hits = new List<ARRaycastHit>();
+        aRRaycastManager.Raycast(screenCenter, hits, TrackableType.Planes);
+        placementPoseIsValid = hits.Count > 0;
+        if (placementPoseIsValid)
+        {
+            PlacementPose = hits[0].pose;
+        }
+    }
+    void ARPlaceObject()
+    {
+        Vector3 objectPosition = PlacementPose.position + new Vector3(0f, 0.01f, 0f);
+        spawnedObject = Instantiate(arObjectToSpawn, objectPosition, PlacementPose.rotation);
+        initialObjectPosition = objectPosition;
+    }
+    public void DisableRotationAndScaling()
+    {
+        allowRotationAndScaling = false;
+    }
+    public void EnableRotationAndScaling()
+    {
+        allowRotationAndScaling = true;
+    }
+    public void OnDriveButtonPressed()
+    {
+        isDriveButtonPressed = true;
+    }
+    public void RotateObject(float deltaRotation)
+    {
+        spawnedObject.transform.Rotate(Vector3.up, -deltaRotation, Space.World);
+        transform.Rotate(0f, deltaRotation, 0f);
+        // Atualiza a rotação atual do objeto
+        currentRotation += deltaRotation;
+    }
+    public float GetCurrentRotation()
+    {
+        // Retorna a rotação atual do objeto em graus
+        return spawnedObject.transform.localEulerAngles.y;
+    }
+    public Vector3 GetInitialObjectPosition()
+    {
+        return initialObjectPosition;
+    }
+    
+}
+
+// esse código leva em consideração que vc quer colocar o objeto no chão e permitir a rotação dele lateralmente com o toque na tela e permite o Zoom e tirar o zoom com formato de pinça dos dedos
+// para fazer coplocar no chão vc precisa criar um gameobject e colocar um material nele tanto faz qual seja, só para este código poder chamar e vc saber onde vai ter seu objeto
